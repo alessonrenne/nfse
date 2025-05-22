@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leitor de NFSe</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Carregar scripts sincronamente para garantir disponibilidade ao exportar PDF -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Adicionar SweetAlert2 para alertas mais bonitos -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- Scripts não críticos ainda podem ser carregados assincronamente -->
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js" async></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#2a5bd7',
+                        'primary-dark': '#1a3a8f',
+                        'primary-light': '#e0e8ff',
+                        accent: '#4caf50',
+                        light: '#f8f9fa',
+                        dark: '#212529',
+                        gray: '#6c757d',
+                        'light-gray': '#e9ecef',
+                        danger: '#dc3545',
+                        warning: '#ffc107',
+                        info: '#17a2b8',
+                    },
+                    spacing: {
+                        'xs': '5px',
+                        'sm': '10px',
+                        'md': '20px',
+                        'lg': '30px',
+                        'xl': '40px',
+                    },
+                    borderRadius: {
+                        'sm': '5px',
+                        'md': '10px',
+                        'lg': '15px',
+                    },
+                    boxShadow: {
+                        'sm': '0 2px 10px rgba(0, 0, 0, 0.1)',
+                        'md': '0 5px 15px rgba(0, 0, 0, 0.1)',
+                        'lg': '0 10px 25px rgba(0, 0, 0, 0.15)',
+                    },
+                    transitionProperty: {
+                        'fast': '0.2s ease',
+                        'normal': '0.3s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                    },
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-light">
+    <!-- Modal de Aviso -->
+    <div id="warningModal" class="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-[2000] hidden">
+        <div class="bg-white p-[40px] rounded-[10px] max-w-[500px] w-[90%] shadow-lg relative">
+            <button class="absolute top-[20px] right-[20px] bg-none border-none text-[1.5rem] cursor-pointer text-gray" id="closeModal">&times;</button>
+            <h2 class="text-primary mb-[20px] flex items-center gap-[10px]"><i class="fas fa-exclamation-triangle text-warning"></i> Aviso Importante</h2>
+            <p class="mb-[20px] leading-[1.6]">O Leitor de XML de NFSe atualmente tem suporte completo apenas para a prefeitura de <strong>Porto Velho</strong>.</p>
+            
+            <p class="mb-[20px] leading-[1.6]">Estamos em fase de testes com os leiautes das seguintes prefeituras:</p>
+            <ul class="mb-[40px] pl-[20px]">
+                <li class="mb-[10px]"><strong>Ariquemes</strong></li>
+                <li class="mb-[10px]"><strong>Ouro Preto do Oeste</strong></li>
+            </ul>
+            
+            <p class="mb-[20px] leading-[1.6]">Se você estiver usando notas fiscais de outras prefeituras, pode ocorrer incompatibilidade na leitura dos dados.</p>
+            
+            <div class="flex justify-end gap-[10px]">
+                <button class="inline-flex items-center justify-center gap-[5px] px-[20px] py-[10px] bg-primary text-white rounded-[5px] font-semibold transition-all duration-300 border-none cursor-pointer text-center" id="understandBtn">Entendi</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Carregamento -->
+    <div id="loadingModal" class="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-[2000] hidden">
+        <div class="bg-white p-[40px] rounded-[10px] max-w-[500px] w-[90%] shadow-lg">
+            <h2 class="text-primary mb-[20px] flex items-center gap-[10px]"><i class="fas fa-spinner fa-spin text-primary"></i> Processando...</h2>
+            <p class="mb-[20px] leading-[1.6]">Por favor, aguarde enquanto processamos os arquivos.</p>
+            <div class="inline-block w-[50px] h-[50px] border-[3px] border-gray-300 rounded-full border-t-primary animate-spin mx-auto"></div>
+        </div>
+    </div>
+
+    <!-- Modal de Exportação -->
+    <div id="exportModal" class="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-[2000] hidden">
+        <div class="bg-white p-[40px] rounded-[10px] max-w-[500px] w-[90%] shadow-lg relative">
+            <button class="absolute top-[20px] right-[20px] bg-none border-none text-[1.5rem] cursor-pointer text-gray" id="closeExportModal">&times;</button>
+            <h2 class="text-primary mb-[20px] flex items-center gap-[10px]"><i class="fas fa-file-export text-primary"></i> Opções de Exportação</h2>
+            
+            <div class="mb-[20px]">
+                <label class="block mb-[10px]">
+                    <input type="checkbox" id="exportDashboard" checked> Incluir Dashboard (gráficos e resumo)
+                </label>
+                <label class="block mb-[10px]">
+                    <input type="checkbox" id="exportTable" checked> Incluir Tabela de Notas
+                </label>
+            </div>
+            
+            <div class="flex justify-end gap-[10px]">
+                <button class="inline-flex items-center justify-center gap-[5px] px-[20px] py-[10px] bg-light-gray text-dark rounded-[5px] font-semibold transition-all duration-300 border-none cursor-pointer text-center" id="cancelExport">Cancelar</button>
+                <button class="inline-flex items-center justify-center gap-[5px] px-[20px] py-[10px] bg-primary text-white rounded-[5px] font-semibold transition-all duration-300 border-none cursor-pointer text-center" id="confirmExportPDF"><i class="fas fa-file-pdf"></i> Exportar PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm fixed w-full z-[1000]">
+        <div class="container mx-auto px-[20px]">
+            <nav class="flex justify-between items-center py-[20px] h-[70px]">
+                <a href="#" class="flex items-center gap-[10px] text-[1.5rem] font-bold text-primary no-underline">
+                    <i class="fas fa-file-invoice-dollar text-[1.8rem]"></i>
+                    <span>Leitor NFSe</span>
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="pt-[110px] pb-[40px] min-h-[calc(100vh-180px)]">
+        <div class="container mx-auto px-[20px]">
+            <div class="text-center mb-[40px]">
+                <h1 class="text-[2.2rem] text-primary mb-[10px]"><i class="fas fa-file-invoice-dollar"></i> Apuração NFS-e</h1>
+                <p class="text-gray max-w-[600px] mx-auto">Empresa: <span id="empresaNome">-</span></p>
+                <p class="text-gray max-w-[600px] mx-auto">Competência: <span id="competencia">-</span></p>
+            </div>
+            
+            <!-- Dropzone para upload -->
+            <div id="dropzone" class="border-2 border-dashed border-primary rounded-[10px] p-[40px] text-center cursor-pointer transition-all duration-300 bg-primary-light mb-[20px] hidden">
+                <i class="fas fa-cloud-upload-alt text-[2rem] text-primary mb-[10px]"></i>
+                <p class="mb-[10px]">Arraste e solte seus arquivos XML aqui</p>
+                <p class="mb-[10px]">ou clique para selecionar</p>
+                <small class="text-sm">Formatos suportados: .xml</small>
+            </div>
+            
+            <!-- Dashboard -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-[20px] mb-[40px]" id="dashboard">
+                <div class="bg-white rounded-[10px] p-[20px] shadow-md flex flex-col transition-all duration-300 border-l-4 border-primary">
+                    <div class="flex items-center mb-[10px] text-gray text-[0.9rem]">
+                        <i class="fas fa-file-invoice-dollar mr-[10px] text-[1.2rem]"></i>
+                        <span>Valor Total</span>
+                    </div>
+                    <div id="valor-total" class="text-[1.8rem] font-bold mb-[5px]">R$ 0,00</div>
+                    <div class="text-[0.8rem] text-gray mt-auto">Soma de todas as notas</div>
+                </div>
+                
+                <div class="bg-white rounded-[10px] p-[20px] shadow-md flex flex-col transition-all duration-300 border-l-4 border-accent">
+                    <div class="flex items-center mb-[10px] text-gray text-[0.9rem]">
+                        <i class="fas fa-percentage mr-[10px] text-[1.2rem]"></i>
+                        <span>Total de Impostos</span>
+                    </div>
+                    <div id="valor-impostos" class="text-[1.8rem] font-bold mb-[5px]">R$ 0,00</div>
+                    <div class="text-[0.8rem] text-gray mt-auto">Soma de todos os impostos</div>
+                </div>
+                
+                <div class="bg-white rounded-[10px] p-[20px] shadow-md flex flex-col transition-all duration-300 border-l-4 border-info">
+                    <div class="flex items-center mb-[10px] text-gray text-[0.9rem]">
+                        <i class="fas fa-check-circle mr-[10px] text-[1.2rem]"></i>
+                        <span>Notas Normais</span>
+                    </div>
+                    <div id="notas-normais" class="text-[1.8rem] font-bold mb-[5px]">0</div>
+                    <div class="text-[0.8rem] text-gray mt-auto">Notas com status normal</div>
+                </div>
+                
+                <div class="bg-white rounded-[10px] p-[20px] shadow-md flex flex-col transition-all duration-300 border-l-4 border-danger">
+                    <div class="flex items-center mb-[10px] text-gray text-[0.9rem]">
+                        <i class="fas fa-ban mr-[10px] text-[1.2rem]"></i>
+                        <span>Notas Canceladas</span>
+                    </div>
+                    <div id="notas-canceladas" class="text-[1.8rem] font-bold mb-[5px]">0</div>
+                    <div class="text-[0.8rem] text-gray mt-auto">Notas com status cancelado</div>
+                </div>
+                
+                <div class="bg-white rounded-[10px] p-[20px] shadow-md col-span-1 md:col-span-2 h-[300px]">
+                    <canvas id="taxesChart" aria-label="Gráfico de distribuição de impostos"></canvas>
+                </div>
+                
+                <div class="bg-white rounded-[10px] p-[20px] shadow-md col-span-1 md:col-span-2 h-[300px]">
+                    <canvas id="statusChart" aria-label="Gráfico de status das notas fiscais"></canvas>
+                </div>
+            </div>
+            
+            <div class="bg-white rounded-[10px] p-[40px] shadow-md">
+                <div class="flex flex-col md:flex-row gap-[10px] mb-[20px] flex-wrap">
+                    <input type="file" id="xmlInput" multiple accept=".xml" class="p-[10px] border border-light-gray rounded-[5px] bg-white flex-1 min-w-[200px]" aria-label="Selecionar arquivos XML" />
+                    <input type="text" id="numeroFilter" placeholder="Número da nota" class="p-[10px] border border-light-gray rounded-[5px] bg-white" aria-label="Filtrar por número da nota" />
+                    <select id="statusFilter" class="p-[10px] border border-light-gray rounded-[5px] bg-white" aria-label="Filtrar por status da nota">
+                        <option value="todos">Situação da Nota</option>
+                        <option value="1">Normal</option>
+                        <option value="2">Cancelada</option>
+                    </select>
+                    <button id="exportExcel" class="inline-flex items-center justify-center gap-[5px] px-[20px] py-[10px] bg-primary text-white rounded-[5px] font-semibold transition-all duration-300 border-none cursor-pointer text-center"><i class="fa-solid fa-file-excel"></i> Exportar para Excel</button>
+                    <button id="exportPDF" class="inline-flex items-center justify-center gap-[5px] px-[20px] py-[10px] bg-primary text-white rounded-[5px] font-semibold transition-all duration-300 border-none cursor-pointer text-center"><i class="fa-solid fa-file-pdf"></i> Exportar para PDF</button>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table id="notasTable" class="w-full border-collapse">
+                        <thead>
+                            <tr class="bg-light-gray">
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="numero">Número <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="dataEmissao">Data <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="razaoSocial">Tomador <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="cnpj">CNPJ/CPF <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="valorNota">Valor Total <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="iss">ISS <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="issRetido">ISS Retido <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="ir">IR <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="pis">PIS <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="cofins">COFINS <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="csll">CSLL <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="inss">INSS <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-left sortable" data-sort="status">Status <i class="fas fa-sort text-gray-400 sort-icon opacity-50"></i></th>
+                                <th class="border border-light-gray p-[12px] text-center">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="text-center p-[40px] text-gray">
+                                <td colspan="14" class="p-[40px]">
+                                    <i class="fas fa-upload text-[3rem] mb-[20px] opacity-50"></i>
+                                    <p class="mb-[10px]">Nenhuma nota carregada. Selecione arquivos XML para começar.</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Paginação -->
+                <div id="pagination" class="flex justify-between items-center mt-[20px] p-[10px] bg-light-gray rounded-[5px] hidden">
+                    <button id="prevPage" class="inline-flex items-center justify-center gap-[5px] px-[20px] py-[10px] bg-white text-dark rounded-[5px] font-semibold transition-all duration-300 border border-light-gray cursor-pointer text-center" disabled><i class="fas fa-chevron-left"></i> Anterior</button>
+                    <div id="pageInfo" class="text-gray">Página 1 de 1</div>
+                    <button id="nextPage" class="inline-flex items-center justify-center gap-[5px] px-[20px] py-[10px] bg-white text-dark rounded-[5px] font-semibold transition-all duration-300 border border-light-gray cursor-pointer text-center" disabled>Próxima <i class="fas fa-chevron-right"></i></button>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <!-- Modal de Detalhes da Nota -->
+    <div id="noteDetail" class="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-[1500] hidden">
+        <div class="bg-white p-[40px] rounded-[10px] max-w-[800px] w-[90%] max-h-[90vh] overflow-y-auto shadow-lg relative">
+            <button class="absolute top-[20px] right-[20px] bg-none border-none text-[1.5rem] cursor-pointer text-gray" id="closeDetail">&times;</button>
+            <h2 class="text-primary mb-[20px] flex items-center gap-[10px]"><i class="fas fa-file-invoice text-primary"></i> Detalhes da Nota</h2>
+            <div id="noteDetailContent"></div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <footer class="bg-dark text-white py-[30px]">
+        <div class="container mx-auto text-center px-[20px]">
+            <p class="mb-[10px]">Leitor de NFSe &copy; 2024 - Todos os direitos reservados</p>
+            <small class="text-gray text-[0.8rem]">Visualizador de arquivos XML de Notas Fiscais de Serviço Eletrônicas</small>
+        </div>
+    </footer>
+    
+    <script src="script.js"></script>
+</body>
+</html>
